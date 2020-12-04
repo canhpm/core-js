@@ -33,11 +33,11 @@ var PROMISE = 'Promise';
 var getInternalState = InternalStateModule.get;
 var setInternalState = InternalStateModule.set;
 var getInternalPromiseState = InternalStateModule.getterFor(PROMISE);
-var NativePromisePrototype = NativePromise && NativePromise.prototype;
 var PromiseConstructor = NativePromise;
 var TypeError = global.TypeError;
 var document = global.document;
 var process = global.process;
+var $fetch = getBuiltIn('fetch');
 var newPromiseCapability = newPromiseCapabilityModule.f;
 var newGenericPromiseCapability = newPromiseCapability;
 var DISPATCH_EVENT = !!(document && document.createEvent && global.dispatchEvent);
@@ -248,7 +248,7 @@ if (FORCED) {
       reactions: [],
       rejection: false,
       state: PENDING,
-      value: undefined
+      value: undefined,
     });
   };
   Internal.prototype = redefineAll(PromiseConstructor.prototype, {
@@ -269,7 +269,7 @@ if (FORCED) {
     // https://tc39.es/ecma262/#sec-promise.prototype.catch
     catch: function (onRejected) {
       return this.then(undefined, onRejected);
-    }
+    },
   });
   OwnPromiseCapability = function () {
     var promise = new Internal();
@@ -284,11 +284,11 @@ if (FORCED) {
       : newGenericPromiseCapability(C);
   };
 
-  if (!IS_PURE && typeof NativePromise == 'function' && NativePromisePrototype !== Object.prototype) {
-    nativeThen = NativePromisePrototype.then;
+  if (!IS_PURE && typeof NativePromise == 'function') {
+    nativeThen = NativePromise.prototype.then;
 
-    // make `Promise#then` return a polyfilled `Promise` for native promise-based APIs
-    redefine(NativePromisePrototype, 'then', function then(onFulfilled, onRejected) {
+    // wrap native Promise#then for native async functions
+    redefine(NativePromise.prototype, 'then', function then(onFulfilled, onRejected) {
       var that = this;
       return new PromiseConstructor(function (resolve, reject) {
         nativeThen.call(that, resolve, reject);
@@ -296,20 +296,23 @@ if (FORCED) {
     // https://github.com/zloirock/core-js/issues/640
     }, { unsafe: true });
 
-    // make `.constructor === Promise` work for native promise-based APIs
-    try {
-      delete NativePromisePrototype.constructor;
-    } catch (error) { /* empty */ }
-
-    // make `instanceof Promise` work for native promise-based APIs
+    // make `instanceof Promise` work for all native promise-based APIs
     if (setPrototypeOf) {
-      setPrototypeOf(NativePromisePrototype, PromiseConstructor.prototype);
+      setPrototypeOf(NativePromise.prototype, PromiseConstructor.prototype);
     }
+
+    // wrap fetch result, TODO: drop it in `core-js@4` in favor of workaround above
+    if (typeof $fetch == 'function') $({ global: true, enumerable: true, forced: true }, {
+      // eslint-disable-next-line no-unused-vars -- required for `.length`
+      fetch: function fetch(input /* , init */) {
+        return promiseResolve(PromiseConstructor, $fetch.apply(global, arguments));
+      },
+    });
   }
 }
 
 $({ global: true, wrap: true, forced: FORCED }, {
-  Promise: PromiseConstructor
+  Promise: PromiseConstructor,
 });
 
 setToStringTag(PromiseConstructor, PROMISE, false, true);
@@ -325,7 +328,7 @@ $({ target: PROMISE, stat: true, forced: FORCED }, {
     var capability = newPromiseCapability(this);
     capability.reject.call(undefined, r);
     return capability.promise;
-  }
+  },
 });
 
 $({ target: PROMISE, stat: true, forced: IS_PURE || FORCED }, {
@@ -333,7 +336,7 @@ $({ target: PROMISE, stat: true, forced: IS_PURE || FORCED }, {
   // https://tc39.es/ecma262/#sec-promise.resolve
   resolve: function resolve(x) {
     return promiseResolve(IS_PURE && this === PromiseWrapper ? PromiseConstructor : this, x);
-  }
+  },
 });
 
 $({ target: PROMISE, stat: true, forced: INCORRECT_ITERATION }, {
@@ -380,5 +383,5 @@ $({ target: PROMISE, stat: true, forced: INCORRECT_ITERATION }, {
     });
     if (result.error) reject(result.value);
     return capability.promise;
-  }
+  },
 });

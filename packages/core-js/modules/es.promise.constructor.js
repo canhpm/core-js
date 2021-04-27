@@ -26,6 +26,7 @@ var PROMISE = 'Promise';
 var getInternalState = InternalStateModule.get;
 var setInternalState = InternalStateModule.set;
 var getInternalPromiseState = InternalStateModule.getterFor(PROMISE);
+var NativePromisePrototype = NativePromise && NativePromise.prototype;
 var PromiseConstructor = NativePromise;
 var TypeError = global.TypeError;
 var document = global.document;
@@ -240,11 +241,11 @@ if (FORCED_PROMISE_CONSTRUCTOR) {
       : newGenericPromiseCapability(C);
   };
 
-  if (!IS_PURE && typeof NativePromise == 'function') {
-    nativeThen = NativePromise.prototype.then;
+  if (!IS_PURE && typeof NativePromise == 'function' && NativePromisePrototype !== Object.prototype) {
+    nativeThen = NativePromisePrototype.then;
 
-    // wrap native Promise#then for native async functions
-    redefine(NativePromise.prototype, 'then', function then(onFulfilled, onRejected) {
+    // make `Promise#then` return a polyfilled `Promise` for native promise-based APIs
+    redefine(NativePromisePrototype, 'then', function then(onFulfilled, onRejected) {
       var that = this;
       return new PromiseConstructor(function (resolve, reject) {
         nativeThen.call(that, resolve, reject);
@@ -252,9 +253,14 @@ if (FORCED_PROMISE_CONSTRUCTOR) {
     // https://github.com/zloirock/core-js/issues/640
     }, { unsafe: true });
 
-    // make `instanceof Promise` work for all native promise-based APIs
+    // make `.constructor === Promise` work for native promise-based APIs
+    try {
+      delete NativePromisePrototype.constructor;
+    } catch (error) { /* empty */ }
+
+    // make `instanceof Promise` work for native promise-based APIs
     if (setPrototypeOf) {
-      setPrototypeOf(NativePromise.prototype, PromiseConstructor.prototype);
+      setPrototypeOf(NativePromisePrototype, PromiseConstructor.prototype);
     }
   }
 }
